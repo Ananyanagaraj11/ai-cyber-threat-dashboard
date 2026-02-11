@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV Analysis - Cyber Threat Intelligence</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Inter:wght@300;400;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #000000;
+            color: #e0f2fe;
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        /* Background Effects */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 212, 170, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 170, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: gridMove 20s linear infinite;
+            z-index: 0;
+        }
+        
+        @keyframes gridMove {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
+        }
+        
+        /* Header */
+        .header {
+            position: relative;
+            z-index: 100;
+            height: 70px;
+            background: rgba(10, 15, 30, 0.8);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 212, 170, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 30px;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .logo-small {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, #00d4aa, #3b82f6);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 20px;
+            font-family: 'Orbitron', sans-serif;
+            color: white;
+            box-shadow: 0 0 20px rgba(0, 212, 170, 0.5);
+        }
+        
+        .header-title {
+            font-size: 20px;
+            font-weight: 600;
+            font-family: 'Orbitron', sans-serif;
+            color: #ffffff;
+        }
+        
+        .nav-menu {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .nav-btn {
+            padding: 10px 20px;
+            background: #2A3F4F;
+            border: 1px solid #7DF2C6;
+            border-radius: 10px;
+            color: #7DF2C6;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(125, 242, 198, 0.15);
+            box-shadow: 0 0 20px rgba(125, 242, 198, 0.3);
+        }
+        
+        /* Main Container */
+        .container {
+            position: relative;
+            z-index: 10;
+            max-width: 1400px;
+            margin: 40px auto;
+            padding: 0 30px;
+        }
+        
+        /* Upload Section */
+        .upload-card {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            border-radius: 16px;
+            padding: 50px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .upload-card h2 {
+            font-size: 28px;
+            font-family: 'Orbitron', sans-serif;
+            margin-bottom: 10px;
+            color: #ffffff;
+        }
+        
+        .upload-card > p {
+            color: #94a3b8;
+            margin-bottom: 40px;
+        }
+        
+        .upload-area {
+            border: 2px dashed rgba(0, 212, 170, 0.3);
+            border-radius: 16px;
+            padding: 60px 40px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .upload-area:hover {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.05);
+        }
+        
+        .upload-area.drag-over {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.1);
+            box-shadow: 0 0 30px rgba(0, 212, 170, 0.3);
+        }
+        
+        .upload-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+            color: #00d4aa;
+        }
+        
+        .btn-upload {
+            margin-top: 20px;
+            padding: 14px 36px;
+            background: linear-gradient(135deg, #00d4aa, #3b82f6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .btn-upload:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 212, 170, 0.4);
+        }
+        
+        .file-info {
+            margin-top: 30px;
+            padding: 25px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 12px;
+        }
+        
+        .file-info p {
+            color: #e0f2fe;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        
+        .btn-analyze {
+            margin-top: 20px;
+            padding: 14px 36px;
+            background: linear-gradient(135deg, #00d4aa, #3b82f6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-analyze:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 20px rgba(0, 212, 170, 0.5);
+        }
+        
+        /* Progress */
+        .progress-section {
+            margin-top: 30px;
+        }
+        
+        .progress-bar {
+            height: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4aa, #3b82f6);
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(0, 212, 170, 0.5);
+        }
+        
+        #progressText {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        
+        /* Results */
+        .results-section {
+            animation: fadeIn 0.5s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        
+        .result-card {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 212, 170, 0.2);
+            border-radius: 16px;
+            padding: 30px;
+        }
+        
+        .result-card.full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .result-card h3 {
+            font-size: 20px;
+            font-family: 'Orbitron', sans-serif;
+            color: #ffffff;
+            margin-bottom: 25px;
+        }
+        
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 25px;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .stat-label {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: 700;
+            font-family: 'Orbitron', sans-serif;
+            color: #00d4aa;
+        }
+        
+        .stat-value.stat-danger {
+            color: #ef4444;
+        }
+        
+        .stat-value.stat-success {
+            color: #22c55e;
+        }
+        
+        .stat-value.stat-info {
+            color: #3b82f6;
+        }
+        
+        /* Table */
+        .table-container {
+            overflow: auto;
+            max-height: 500px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            position: sticky;
+            top: 0;
+            background: rgba(10, 15, 30, 0.95);
+            z-index: 10;
+        }
+        
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0, 212, 170, 0.1);
+        }
+        
+        th {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+        
+        td {
+            color: #e0f2fe;
+            font-size: 13px;
+        }
+        
+        tr:hover {
+            background: rgba(0, 212, 170, 0.05);
+        }
+        
+        .class-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .class-badge.benign {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+        
+        .class-badge.bot {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        
+        .class-badge.ddos {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .class-badge.portscan {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+        
+        .status-correct {
+            color: #22c55e;
+            font-weight: 600;
+        }
+        
+        .status-incorrect {
+            color: #ef4444;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    
+    <header class="header">
+        <div class="header-left">
+            <div class="logo-small">AI</div>
+            <h1 class="header-title">CSV Analysis & Upload</h1>
+        </div>
+        <div class="nav-menu">
+            <a href="index.html" class="nav-btn">Home</a>
+            <a href="analysis.html" class="nav-btn">CSV Analysis</a>
+            <a href="dashboard.html" class="nav-btn">Dashboard</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="upload-card">
+            <h2>Upload CICIDS2017 CSV File</h2>
+            <p>Upload a CSV file from the CICIDS2017 dataset for real-time threat analysis</p>
+            
+            <div class="upload-area" id="uploadArea">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <p style="font-size: 16px; color: #94a3b8; margin-bottom: 10px;">Drag and drop CSV file here</p>
+                <p style="font-size: 13px; color: #64748b; margin: 15px 0;">or</p>
+                <input type="file" id="fileInput" accept=".csv" style="display: none">
+                <button class="btn-upload" onclick="document.getElementById('fileInput').click()">
+                    Choose File
+                </button>
+            </div>
+
+            <div id="fileInfo" class="file-info" style="display: none;">
+                <p><strong>Selected File:</strong> <span id="fileName"></span></p>
+                <p><strong>Size:</strong> <span id="fileSize"></span></p>
+                <button class="btn-analyze" onclick="analyzeFile()">Analyze File</button>
+            </div>
+
+            <div id="analysisProgress" class="progress-section" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="progressText">Analyzing...</p>
+            </div>
+        </div>
+
+        <div id="resultsSection" class="results-section" style="display: none;">
+            <p style="margin-bottom: 20px;"><a href="dashboard.html" class="nav-btn" style="display: inline-block;">View on Dashboard →</a></p>
+            <div class="results-grid">
+                <div class="result-card">
+                    <h3>Analysis Summary</h3>
+                    <div class="summary-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Total Rows Analyzed</span>
+                            <span class="stat-value" id="totalRows">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Attack Events</span>
+                            <span class="stat-value stat-danger" id="attackCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Benign Traffic</span>
+                            <span class="stat-value stat-success" id="benignCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Attack Percentage</span>
+                            <span class="stat-value" id="attackPercent">0%</span>
+                        </div>
+                        <div class="stat-item" id="accuracyItem" style="display: none;">
+                            <span class="stat-label">Model Accuracy</span>
+                            <span class="stat-value stat-info" id="modelAccuracy">N/A</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="result-card">
+                    <h3>Attack Distribution</h3>
+                    <div id="attackDistChart" style="height: 340px; min-height: 340px;"></div>
+                </div>
+
+                <div class="result-card full-width">
+                    <h3>Detailed Results (First 100 rows)</h3>
+                    <div class="table-container">
+                        <table id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th>Index</th>
+                                    <th>Predicted Class</th>
+                                    <th>Confidence</th>
+                                    <th>Actual Label</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script src="js/upload.js"></script>
+</body>
+</html>
