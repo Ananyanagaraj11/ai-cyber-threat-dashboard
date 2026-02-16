@@ -1,649 +1,459 @@
-// Configuration: use environment variable, same origin, or localhost:8000
-const API_BASE = (typeof window !== 'undefined' && window.ENV_API_BASE) 
-    ? window.ENV_API_BASE 
-    : (typeof window !== 'undefined' && (window.location.port === '8000' || !/^localhost$/i.test(window.location.hostname))) 
-        ? '' 
-        : 'http://localhost:8000';
-let FEATURE_COUNT = 78;
-let CLASS_NAMES = [];
+/* ============================================
+   SOC Lite – AI IDS Dashboard Controller
+   Full Final Version – Dark Neon Themed
+   ============================================ */
+
+/* Same origin when served from backend (port 8000), else ENV for Render */
+const API_BASE = (typeof window !== "undefined" && window.ENV_API_BASE != null && window.ENV_API_BASE !== "")
+    ? window.ENV_API_BASE
+    : (window.location.port === "8000" ? "" : window.location.origin);
+
 let predictionHistory = [];
 let totalPredictions = 0;
 let attackCount = 0;
-/** When set, Attack Distribution and Top Attack Types use this (full CSV summary) so dashboard matches CSV page. */
 let lastClassDistribution = null;
+let lastConfidenceBuckets = null;
 
-// Initialize dashboard
-(async function init() {
+/* ============================================
+   INIT
+   ============================================ */
+
+document.addEventListener("DOMContentLoaded", async () => {
     updateClock();
     setInterval(updateClock, 1000);
 
-    const loadCsvBtn = document.getElementById('loadCSVBtn');
-    if (loadCsvBtn) loadCsvBtn.addEventListener('click', loadCSVResultsClick);
-
-    await checkHealth();
-    await getConfig();
-
     initializeCharts();
+    await loadLatestAnalysis();
 
-    // Load last CSV analysis from backend (or localStorage) so dashboard shows CSV results
-    const hasCSV = await loadSavedCSVAnalysisAsync();
-    if (!hasCSV) {
-        setTimeout(() => runPrediction(), 1000);
-    }
-})();
+    const runBtn = document.getElementById("runPredictionBtn");
+    if (runBtn) runBtn.addEventListener("click", runLivePrediction);
+});
 
-// Update clock
-function updateClock() {
-    const el = document.getElementById('clock');
-    if (el && typeof moment !== 'undefined') el.textContent = moment().format('MMM DD, YYYY | HH:mm:ss');
-}
+/* ============================================
+   RUN LIVE PREDICTION (single sample)
+   ============================================ */
 
-// Check backend health
-async function checkHealth() {
+async function runLivePrediction() {
+    var runBtn = document.getElementById("runPredictionBtn");
+    if (runBtn) runBtn.disabled = true;
     try {
-        const response = await fetch(`${API_BASE}/health`);
-        if (response.ok) {
-            setStatus(true, 'Connected');
-        } else {
-            setStatus(false, 'Disconnected');
-        }
-    } catch (error) {
-        setStatus(false, 'Backend Offline');
-        console.error('Health check failed:', error);
-    }
-}
+        var configRes = await fetch(API_BASE + "/config", { cache: "no-store" });
+        if (!configRes.ok) throw new Error("Config failed");
+        var config = await configRes.json();
+        var dim = config.input_dim || 78;
+        var features = Array(dim).fill(0).map(() => Math.random() * 2 - 1);
 
-// Get model configuration
-async function getConfig() {
-    try {
-        const response = await fetch(`${API_BASE}/config`);
-        const data = await response.json();
-        if (data.input_dim > 0) {
-            FEATURE_COUNT = data.input_dim;
-        }
-        if (data.class_names && data.class_names.length > 0) {
-            CLASS_NAMES = data.class_names;
-        }
-        console.log(`Model config: ${FEATURE_COUNT} features, ${CLASS_NAMES.length} classes`);
-    } catch (error) {
-        console.error('Config fetch failed:', error);
-    }
-}
-
-// Called when user clicks "Load CSV results"
-function loadCSVResultsClick() {
-    loadSavedCSVAnalysisAsync().then(loaded => {
-        if (!loaded) {
-            alert('No CSV analysis found.\n\n1. Go to the "CSV Analysis" page.\n2. Upload your CICIDS2017 CSV file.\n3. Click "Analyze File".\n4. Then return here and click "Load CSV results" or "Run Prediction".\n\nMake sure the backend (localhost:8000) is running.');
-        }
-    });
-}
-
-// Apply a loaded CSV analysis object to the dashboard (KPIs, charts, alerts, table)
-function applyCSVAnalysis(data) {
-    const preds = data && Array.isArray(data.predictions) ? data.predictions : null;
-    if (!preds || preds.length === 0) return false;
-predictionHistory = preds.map(p => ({
-            predicted_class: p.predicted_class,
-            confidence: p.confidence,
-            actual_label: p.actual_label
-        }));
-        totalPredictions = data.total_rows != null ? data.total_rows : predictionHistory.length;
-        if (data.summary && data.summary.total_attacks != null) {
-            attackCount = data.summary.total_attacks;
-        } else {
-            attackCount = predictionHistory.filter(p => p.predicted_class !== 'BENIGN').length;
-        }
-        lastClassDistribution = (data.summary && data.summary.class_distribution) ? data.summary.class_distribution : null;
-        updateKPIs();
-    updateCharts();
-    populateAlertsFromHistory();
-    populateCSVResultsTable(preds);
-    const section = document.getElementById('csvResultsSection');
-    if (section) section.style.display = 'block';
-    setStatus(true, 'CSV data loaded');
-    return true;
-}
-
-// Load CSV analysis: try backend first (GET /api/last-analysis), then localStorage. Works even if dashboard is file:// and CSV page was localhost.
-async function loadSavedCSVAnalysisAsync() {
-    try {
-        const response = await fetch(`${API_BASE}/api/last-analysis`);
-        if (response.ok) {
-            const data = await response.json();
-            if (data && Array.isArray(data.predictions) && data.predictions.length > 0) {
-                return applyCSVAnalysis(data);
-            }
-        }
-    } catch (e) {
-        console.warn('Backend last-analysis not available', e);
-    }
-    try {
-        const saved = localStorage.getItem('lastAnalysis');
-        if (!saved) return false;
-        const data = JSON.parse(saved);
-        return applyCSVAnalysis(data);
-    } catch (e) {
-        console.error('Load CSV analysis failed', e);
-        return false;
-    }
-}
-
-
-// Fill Recent Alerts from current prediction history (e.g. after loading CSV)
-function populateAlertsFromHistory() {
-    const container = document.getElementById('alertsTable');
-    if (!container) return;
-    container.innerHTML = '';
-    const last = predictionHistory.slice(-20).reverse();
-    last.forEach((pred, i) => {
-        const alertItem = document.createElement('div');
-        const className = pred.predicted_class || 'Unknown';
-        const confidence = ((pred.confidence || 0) * 100).toFixed(1);
-        let severity = 'benign';
-        if (className !== 'BENIGN') {
-            if (confidence > 90) severity = 'critical';
-            else if (confidence > 75) severity = 'high';
-            else if (confidence > 50) severity = 'medium';
-            else severity = 'low';
-        }
-        alertItem.className = `alert-item ${severity}`;
-        alertItem.innerHTML = `
-            <div class="alert-header">
-                <span class="alert-type">${className}</span>
-                <span class="alert-time">—</span>
-            </div>
-            <div class="alert-confidence">Confidence: ${confidence}%</div>
-        `;
-        container.appendChild(alertItem);
-    });
-}
-
-// Populate CSV results table (Entry #, Predicted, Confidence, Actual, Correct/Incorrect)
-function populateCSVResultsTable(predictions) {
-    const tbody = document.getElementById('csvResultsTableBody');
-    const section = document.getElementById('csvResultsSection');
-    if (!tbody || !section) return;
-    tbody.innerHTML = '';
-    (predictions || []).forEach(pred => {
-        const tr = document.createElement('tr');
-        const hasActual = pred.actual_label != null;
-        const isCorrect = hasActual ? pred.predicted_class === pred.actual_label : null;
-        const badgeClass = (pred.predicted_class || '').toLowerCase().replace(/\s+/g, '-');
-        tr.innerHTML = `
-            <td>${(pred.index || 0) + 1}</td>
-            <td><span class="class-badge ${badgeClass}">${pred.predicted_class || 'Unknown'}</span></td>
-            <td>${((pred.confidence || 0) * 100).toFixed(1)}%</td>
-            <td>${hasActual ? pred.actual_label : 'N/A'}</td>
-            <td>${hasActual ? (isCorrect ? '<span class="status-correct">✓ Correct</span>' : '<span class="status-incorrect">✗ Incorrect</span>') : 'N/A'}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-// Clear CSV data and reset dashboard to live mode
-function clearCSVData() {
-    localStorage.removeItem('lastAnalysis');
-    localStorage.removeItem('lastAnalysisTime');
-    lastClassDistribution = null;
-    predictionHistory = [];
-    totalPredictions = 0;
-    attackCount = 0;
-    updateKPIs();
-    initializeCharts();
-    const container = document.getElementById('alertsTable');
-    if (container) container.innerHTML = '';
-    const section = document.getElementById('csvResultsSection');
-    if (section) section.style.display = 'none';
-    const tbody = document.getElementById('csvResultsTableBody');
-    if (tbody) tbody.innerHTML = '';
-    setStatus(true, 'Connected');
-    setTimeout(() => runPrediction(), 500);
-}
-
-// Set status indicator
-function setStatus(connected, text) {
-    const indicator = document.getElementById('statusIndicator');
-    const statusText = document.getElementById('statusText');
-    
-    if (connected) {
-        indicator.classList.add('connected');
-    } else {
-        indicator.classList.remove('connected');
-    }
-    statusText.textContent = text;
-}
-
-// Generate random features
-function generateRandomFeatures() {
-    return Array.from({ length: FEATURE_COUNT }, () => Math.random() * 100);
-}
-
-// Run prediction — if CSV results exist (backend or localStorage), load and show them; otherwise run one live prediction
-async function runPrediction() {
-    const btn = document.getElementById('runPredictionBtn');
-    if (!btn) return;
-    btn.disabled = true;
-    btn.textContent = 'Processing...';
-
-    // Prefer loading CSV results from backend, then localStorage
-    const hasCSV = await loadSavedCSVAnalysisAsync();
-    if (hasCSV) {
-        btn.disabled = false;
-        btn.textContent = 'Run Prediction';
-        return;
-    }
-
-    try {
-        lastClassDistribution = null;
-        const features = generateRandomFeatures();
-        const response = await fetch(`${API_BASE}/predict`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ features })
+        var predRes = await fetch(API_BASE + "/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ features: features })
         });
+        if (!predRes.ok) throw new Error("Predict failed");
+        var pred = await predRes.json();
 
-        const data = await response.json();
-
-        predictionHistory.push(data);
-        if (predictionHistory.length > 50) {
-            predictionHistory.shift();
-        }
-
-        totalPredictions++;
-        if (data.predicted_class !== 'BENIGN') {
-            attackCount++;
-        }
+        predictionHistory.push({
+            index: predictionHistory.length,
+            predicted_class: pred.predicted_class,
+            confidence: pred.confidence,
+            actual_label: null
+        });
+        totalPredictions = predictionHistory.length;
+        attackCount = predictionHistory.filter(p => p.predicted_class !== "BENIGN").length;
+        lastClassDistribution = null;
+        lastConfidenceBuckets = null;
 
         updateKPIs();
         updateCharts();
-        addAlert(data);
+        populateAlerts();
+        populateTable();
+        var csvSection = document.getElementById("csvResultsSection");
+        if (csvSection) csvSection.style.display = "block";
+    } catch (e) {
+        console.error(e);
+        alert("Backend not reachable. Start the server on port 8000.");
+    }
+    if (runBtn) runBtn.disabled = false;
+}
 
-        setStatus(true, 'Connected');
-    } catch (error) {
-        console.error('Prediction failed:', error);
-        setStatus(false, 'Request Failed');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Run Prediction';
+/* ============================================
+   CLOCK
+   ============================================ */
+
+function updateClock() {
+    const el = document.getElementById("clock");
+    if (el && typeof moment !== "undefined") {
+        el.textContent = moment().format("MMM DD, YYYY | HH:mm:ss");
     }
 }
 
-// Update KPIs
+/* ============================================
+   LOAD BACKEND ANALYSIS
+   ============================================ */
+
+async function loadLatestAnalysis() {
+    try {
+        const response = await fetch(`${API_BASE}/api/last-analysis`, {
+            cache: "no-store"
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data && (data.total_rows > 0 || (data.predictions && data.predictions.length > 0))) {
+                applyAnalysis(data);
+                console.log("Dashboard loaded fresh backend analysis");
+            }
+        }
+    } catch (err) {
+        console.error("Backend not reachable:", err);
+    }
+}
+
+/* ============================================
+   APPLY DATA
+   ============================================ */
+
+function applyAnalysis(data) {
+    /* Backend sends first 100 in predictions; full counts in summary */
+    predictionHistory = data.predictions || [];
+    totalPredictions = data.total_rows ?? predictionHistory.length;
+
+    attackCount =
+        data.summary?.total_attacks ??
+        predictionHistory.filter(p => p.predicted_class !== "BENIGN").length;
+
+    lastClassDistribution = data.summary?.class_distribution ?? null;
+    lastConfidenceBuckets = data.summary?.confidence_buckets ?? null;
+
+    updateKPIs();
+    updateCharts();
+    populateAlerts();
+    populateTable();
+
+    var csvSection = document.getElementById("csvResultsSection");
+    if (csvSection && (predictionHistory.length > 0 || totalPredictions > 0))
+        csvSection.style.display = "block";
+}
+
+/* ============================================
+   KPI UPDATE
+   ============================================ */
+
 function updateKPIs() {
-    document.getElementById('totalEvents').textContent = totalPredictions.toLocaleString();
-    document.getElementById('eventsChange').textContent = predictionHistory.length;
-    document.getElementById('attackEvents').textContent = attackCount.toLocaleString();
-    
-    const attackPercent = totalPredictions > 0 ? ((attackCount / totalPredictions) * 100).toFixed(1) : 0;
-    document.getElementById('attackPercent').textContent = attackPercent;
-    
-    // Update threat level
-    const threatLevelEl = document.getElementById('threatLevel');
-    const threatDescEl = document.getElementById('threatDesc');
-    
-    if (attackPercent >= 50) {
-        threatLevelEl.textContent = 'CRITICAL';
-        threatLevelEl.className = 'CRITICAL';
-        threatDescEl.textContent = 'Immediate Action Required';
-    } else if (attackPercent >= 30) {
-        threatLevelEl.textContent = 'HIGH';
-        threatLevelEl.className = 'HIGH';
-        threatDescEl.textContent = 'Elevated Threat Activity';
-    } else if (attackPercent >= 15) {
-        threatLevelEl.textContent = 'MEDIUM';
-        threatLevelEl.className = 'MEDIUM';
-        threatDescEl.textContent = 'Moderate Risk Detected';
-    } else if (attackPercent > 0) {
-        threatLevelEl.textContent = 'LOW';
-        threatLevelEl.className = 'LOW';
-        threatDescEl.textContent = 'Minimal Threats Observed';
-    } else {
-        threatLevelEl.textContent = 'NORMAL';
-        threatLevelEl.className = 'NORMAL';
-        threatDescEl.textContent = 'System Secure';
-    }
+    var el;
+    if ((el = document.getElementById("totalEvents"))) el.textContent = totalPredictions;
+    if ((el = document.getElementById("attackEvents"))) el.textContent = attackCount;
+    const percent =
+        totalPredictions > 0
+            ? ((attackCount / totalPredictions) * 100).toFixed(1)
+            : 0;
+    if ((el = document.getElementById("attackPercent"))) el.textContent = percent;
 }
 
-// Update all charts (each in try/catch so one failure doesn't break others)
-function updateCharts() {
-    try { updateAttackDistPie(); } catch (e) { console.warn('Attack dist pie', e); }
-    try { updateTopAttacksBar(); } catch (e) { console.warn('Top attacks bar', e); }
-    try { updateSeverityLine(); } catch (e) { console.warn('Severity line', e); }
-    try { updateEventsTimeline(); } catch (e) { console.warn('Events timeline', e); }
-    try { updateFeatureImportance(); } catch (e) { console.warn('Feature importance', e); }
-}
+/* ============================================
+   CHART INITIALIZATION
+   ============================================ */
 
-// Initialize empty charts
 function initializeCharts() {
-    const darkTemplate = {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        font: { color: '#e0f2fe', family: 'Inter, Segoe UI' },
-        xaxis: { gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        yaxis: { gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' }
+
+    const layoutBase = {
+        paper_bgcolor: "transparent",
+        plot_bgcolor: "transparent",
+        font: { color: "#e0f2fe" },
+        margin: { l: 44, r: 16, t: 24, b: 36 },
+        autosize: true
     };
-    
-    // Attack Distribution Pie
-    Plotly.newPlot('attackDistPie', [{
+
+    Plotly.newPlot("attackDistPie", [{
         values: [1],
-        labels: ['No Data'],
-        type: 'pie',
-        hole: 0.4,
-        marker: { colors: ['#2d5a7b'] }
-    }], {
-        ...darkTemplate,
-        showlegend: true,
-        legend: { x: 0, y: 1, font: { size: 10 } },
-        margin: { l: 20, r: 20, t: 20, b: 20 }
-    }, { responsive: true });
-    
-    // Top Attacks Bar
-    Plotly.newPlot('topAttacksBar', [{
+        labels: ["No Data"],
+        type: "pie",
+        hole: 0.5,
+        marker: { colors: ["#f8fafc"] }
+    }], layoutBase);
+
+    Plotly.newPlot("topAttacksBar", [{
         x: [0],
-        y: ['No Data'],
-        type: 'bar',
-        orientation: 'h',
-        marker: { color: '#2d5a7b' }
-    }], {
-        ...darkTemplate,
-        margin: { l: 120, r: 20, t: 20, b: 40 }
-    }, { responsive: true });
-    
-    // Severity Line
-    Plotly.newPlot('severityLine', [{
+        y: ["No Data"],
+        type: "bar",
+        orientation: "h",
+        marker: { color: "#f8fafc" }
+    }], layoutBase);
+
+    Plotly.newPlot("severityLine", [{
         x: [],
         y: [],
-        type: 'scatter',
-        mode: 'lines',
-        fill: 'tozeroy',
-        line: { color: '#00d4aa', width: 2 }
-    }], {
-        ...darkTemplate,
-        margin: { l: 40, r: 20, t: 20, b: 40 }
-    }, { responsive: true });
-    
-    // Events Timeline
-    Plotly.newPlot('eventsTimeline', [], {
-        ...darkTemplate,
-        margin: { l: 50, r: 20, t: 20, b: 40 }
-    }, { responsive: true });
-    
-    // Feature Importance
-    Plotly.newPlot('featureImportance', [{
-        x: [0],
-        y: ['No Data'],
-        type: 'bar',
-        orientation: 'h',
-        marker: { color: '#2d5a7b' }
-    }], {
-        ...darkTemplate,
-        margin: { l: 150, r: 20, t: 20, b: 40 }
-    }, { responsive: true });
+        type: "scatter",
+        mode: "lines",
+        fill: "tozeroy",
+        line: { color: "#b91c1c", width: 3 }
+    }], layoutBase);
+
+    Plotly.newPlot("eventsTimeline", [], layoutBase);
+
+    var layoutConf = { ...layoutBase };
+    Plotly.newPlot("confidenceDist", [{
+        x: ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"],
+        y: [0, 0, 0, 0, 0],
+        type: "bar",
+        marker: { color: "#f8fafc" }
+    }], layoutConf);
 }
 
-// Update Attack Distribution Pie Chart (uses full CSV class_distribution when available so it matches CSV page)
-function updateAttackDistPie() {
-    const classCounts = {};
-    if (lastClassDistribution && typeof lastClassDistribution === 'object') {
-        Object.assign(classCounts, lastClassDistribution);
+/* ============================================
+   UPDATE CHARTS
+   ============================================ */
+
+var chartLayoutUpdate = {
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+    font: { color: "#e0f2fe" },
+    margin: { l: 44, r: 16, t: 24, b: 36 },
+    autosize: true
+};
+
+function updateCharts() {
+    updatePie();
+    updateBar();
+    updateSeverity();
+    updateTimeline();
+    updateConfidenceDist();
+}
+
+/* ---------- PIE ---------- */
+
+function updatePie() {
+    const counts = {};
+
+    if (lastClassDistribution) {
+        Object.assign(counts, lastClassDistribution);
     } else {
-        predictionHistory.forEach(pred => {
-            const className = pred.predicted_class || 'Unknown';
-            classCounts[className] = (classCounts[className] || 0) + 1;
+        predictionHistory.forEach(p => {
+            counts[p.predicted_class] =
+                (counts[p.predicted_class] || 0) + 1;
         });
     }
-    const labels = Object.keys(classCounts);
-    const values = Object.values(classCounts);
-    const colors = [
-        '#00d4aa', '#3b82f6', '#ef4444', '#f59e0b', '#22c55e',
-        '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#84cc16'
+
+    const labels = Object.keys(counts);
+    const values = Object.values(counts);
+    if (labels.length === 0) { labels.push("No Data"); values.push(1); }
+
+    const chartColors = [
+        "#f8fafc",  /* BENIGN – white */
+        "#dc2626",  /* attack – red */
+        "#ea580c",  /* attack – orange */
+        "#ca8a04",  /* attack – amber */
+        "#16a34a",  /* green */
+        "#2563eb",  /* blue */
+        "#9333ea"   /* purple */
     ];
-    if (labels.length === 0) {
-        Plotly.react('attackDistPie', [{
-            values: [1],
-            labels: ['No Data'],
-            type: 'pie',
-            hole: 0.4,
-            marker: { colors: ['#2d5a7b'] }
-        }], { showlegend: false, margin: { l: 20, r: 20, t: 20, b: 20 }, height: 280 }, { responsive: true });
-        return;
-    }
-    Plotly.react('attackDistPie', [{
-        values: values,
-        labels: labels,
-        type: 'pie',
-        hole: 0.4,
-        marker: { colors: colors.slice(0, labels.length) },
-        textinfo: 'percent',
-        textposition: 'inside',
-        insidetextorientation: 'radial',
-        hoverinfo: 'label+percent+value'
-    }], {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        font: { color: '#e0f2fe', size: 12 },
-        showlegend: true,
-        legend: {
-            x: 0.5,
-            y: -0.12,
-            xanchor: 'center',
-            yanchor: 'top',
-            orientation: 'h',
-            font: { size: 11 },
-            tracegroupgap: 16
-        },
-        margin: { l: 20, r: 20, t: 30, b: 70 },
-        height: 280
-    }, { responsive: true });
+
+    Plotly.react("attackDistPie", [{
+        values,
+        labels,
+        type: "pie",
+        hole: 0.5,
+        marker: { colors: chartColors },
+        textinfo: "percent",
+        textposition: "inside"
+    }], chartLayoutUpdate);
 }
 
-// Update Top Attack Types bar (uses full CSV class_distribution when available so it matches CSV page)
-function updateTopAttacksBar() {
-    const classCounts = {};
-    if (lastClassDistribution && typeof lastClassDistribution === 'object') {
-        Object.assign(classCounts, lastClassDistribution);
+/* ---------- BAR ---------- */
+
+function updateBar() {
+    const counts = {};
+
+    if (lastClassDistribution) {
+        Object.assign(counts, lastClassDistribution);
     } else {
-        predictionHistory.forEach(pred => {
-            const className = pred.predicted_class || 'Unknown';
-            classCounts[className] = (classCounts[className] || 0) + 1;
+        predictionHistory.forEach(p => {
+            counts[p.predicted_class] =
+                (counts[p.predicted_class] || 0) + 1;
         });
     }
-    const sorted = Object.entries(classCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10);
-    const labels = sorted.map(([label]) => label);
-    const values = sorted.map(([, count]) => count);
-    if (labels.length === 0) {
-        Plotly.react('topAttacksBar', [{
-            x: [0],
-            y: ['No Data'],
-            type: 'bar',
-            orientation: 'h',
-            marker: { color: '#2d5a7b' }
-        }], { paper_bgcolor: 'transparent', plot_bgcolor: 'transparent', margin: { l: 120, r: 20, t: 20, b: 40 } }, { responsive: true });
-        return;
-    }
-    const colorScale = values.map((v, i) => {
-        const ratio = i / Math.max(values.length - 1, 1);
-        return `rgb(${59 + ratio * 196}, ${130 + ratio * 126}, ${246 - ratio * 90})`;
+
+    const sorted = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) sorted.push(["No Data", 0]);
+
+    const attackColors = ["#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#9333ea"];
+    const yLabels = sorted.map(s => s[0]);
+    let attackIdx = 0;
+    const colors = yLabels.map(function (label) {
+        if (label === "BENIGN") return "#f8fafc";
+        return attackColors[attackIdx++ % attackColors.length];
     });
-    Plotly.react('topAttacksBar', [{
-        x: values,
-        y: labels,
-        type: 'bar',
-        orientation: 'h',
-        marker: { color: colorScale, line: { color: '#2d5a7b', width: 1 } }
-    }], {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        font: { color: '#e0f2fe' },
-        xaxis: { gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        yaxis: { gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        margin: { l: 120, r: 20, t: 20, b: 40 }
-    }, { responsive: true });
+
+    Plotly.react("topAttacksBar", [{
+        x: sorted.map(s => s[1]),
+        y: yLabels,
+        type: "bar",
+        orientation: "h",
+        marker: { color: colors }
+    }], chartLayoutUpdate);
 }
 
-// Update Severity Line Chart (use react so chart updates with many points from CSV)
-function updateSeverityLine() {
-    const severityScores = predictionHistory.map((pred) => {
-        const confidence = pred.confidence || 0;
-        const isAttack = pred.predicted_class !== 'BENIGN' ? 1 : 0;
-        return confidence * isAttack;
-    });
-    const indices = severityScores.map((_, idx) => idx + 1);
-    const layout = {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        font: { color: '#e0f2fe', family: 'Inter, Segoe UI' },
-        xaxis: { title: 'Event #', gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        yaxis: { title: 'Severity Score', gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b', range: [0, 1] },
-        margin: { l: 40, r: 20, t: 20, b: 40 }
-    };
-    if (indices.length === 0) {
-        Plotly.react('severityLine', [{
-            x: [],
-            y: [],
-            type: 'scatter',
-            mode: 'lines',
-            fill: 'tozeroy',
-            line: { color: '#00d4aa', width: 2 }
-        }], layout, { responsive: true });
+/* ---------- CONFIDENCE DISTRIBUTION ---------- */
+
+function updateConfidenceDist() {
+    var labels = ["0-20%", "20-40%", "40-60%", "60-80%", "80-100%"];
+    var buckets;
+    if (lastConfidenceBuckets && Array.isArray(lastConfidenceBuckets) && lastConfidenceBuckets.length === 5) {
+        buckets = lastConfidenceBuckets.slice();
+    } else {
+        buckets = [0, 0, 0, 0, 0];
+        predictionHistory.forEach(function (p) {
+            var pct = Math.round((p.confidence || 0) * 100);
+            pct = Math.max(0, Math.min(100, pct));
+            var idx = pct <= 20 ? 0 : pct <= 40 ? 1 : pct <= 60 ? 2 : pct <= 80 ? 3 : 4;
+            buckets[idx]++;
+        });
+    }
+    var total = buckets.reduce(function (a, b) { return a + b; }, 0);
+    var layout = Object.assign({}, chartLayoutUpdate);
+    layout.xaxis = { type: "category", categoryorder: "array", categoryarray: labels, tickangle: 0 };
+    layout.yaxis = layout.yaxis || {};
+    if (total === 0) {
+        layout.yaxis.range = [0, 1];
+        layout.annotations = [{ x: 2, y: 0.5, text: "No data", showarrow: false, font: { size: 14 }, xref: "x", yref: "paper" }];
+        Plotly.react("confidenceDist", [{
+            x: labels,
+            y: [0, 0, 0, 0, 0],
+            type: "bar",
+            orientation: "v",
+            marker: { color: "#f8fafc" },
+            hovertemplate: "%{x}: 0<extra></extra>"
+        }], layout);
         return;
     }
-    Plotly.react('severityLine', [{
-        x: indices,
+    var pctValues = buckets.map(function (c) { return total > 0 ? (c / total * 100) : 0; });
+    layout.yaxis.range = [0, 100];
+    layout.yaxis.ticksuffix = "%";
+    Plotly.react("confidenceDist", [{
+        x: labels,
+        y: pctValues,
+        type: "bar",
+        orientation: "v",
+        marker: { color: "#f8fafc" },
+        text: buckets.map(function (c) { return c.toLocaleString(); }),
+        textposition: "outside",
+        hovertemplate: "%{x}<br>Count: %{text}<br>Share: %{y:.1f}%<extra></extra>"
+    }], layout);
+}
+
+/* ---------- SEVERITY LINE ---------- */
+
+function updateSeverity() {
+    const severityScores = predictionHistory.map(p =>
+        p.predicted_class !== "BENIGN" ? p.confidence : 0
+    );
+    if (severityScores.length === 0) severityScores.push(0);
+
+    Plotly.react("severityLine", [{
+        x: severityScores.map((_, i) => i + 1),
         y: severityScores,
-        type: 'scatter',
-        mode: 'lines',
-        fill: 'tozeroy',
-        line: { color: '#00d4aa', width: 2 }
-    }], layout, { responsive: true });
+        type: "scatter",
+        mode: "lines",
+        fill: "tozeroy",
+        line: { color: "#b91c1c", width: 2 }
+    }], chartLayoutUpdate);
 }
 
-// Update Events Timeline (Total / Attacks / Benign over event sequence)
-function updateEventsTimeline() {
-    const totalEvents = [];
-    const attackEvents = [];
-    const benignEvents = [];
-    const timestamps = [];
-    let runningTotal = 0;
-    let runningAttacks = 0;
-    let runningBenign = 0;
-    predictionHistory.forEach((pred, idx) => {
-        runningTotal++;
-        if (pred.predicted_class === 'BENIGN') {
-            runningBenign++;
-        } else {
-            runningAttacks++;
+/* ---------- TIMELINE ---------- */
+
+function updateTimeline() {
+    let total = 0;
+    let attacks = 0;
+    let benign = 0;
+
+    const totalArr = [];
+    const attackArr = [];
+    const benignArr = [];
+
+    predictionHistory.forEach(p => {
+        total++;
+        if (p.predicted_class === "BENIGN") benign++;
+        else attacks++;
+
+        totalArr.push(total);
+        attackArr.push(attacks);
+        benignArr.push(benign);
+    });
+    if (totalArr.length === 0) { totalArr.push(1); attackArr.push(0); benignArr.push(0); }
+
+    Plotly.react("eventsTimeline", [
+        {
+            x: totalArr.map((_, i) => i + 1),
+            y: totalArr,
+            type: "scatter",
+            mode: "lines",
+            name: "Total",
+            line: { color: "#f8fafc" }
+        },
+        {
+            x: totalArr.map((_, i) => i + 1),
+            y: attackArr,
+            type: "scatter",
+            mode: "lines",
+            name: "Attacks",
+            line: { color: "#b91c1c" }
+        },
+        {
+            x: totalArr.map((_, i) => i + 1),
+            y: benignArr,
+            type: "scatter",
+            mode: "lines",
+            name: "Benign",
+            line: { color: "#15803d" }
         }
-        totalEvents.push(runningTotal);
-        attackEvents.push(runningAttacks);
-        benignEvents.push(runningBenign);
-        timestamps.push(idx + 1);
-    });
-    const layout = {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        font: { color: '#e0f2fe', family: 'Inter, Segoe UI' },
-        xaxis: { title: 'Event Sequence', gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        yaxis: { title: 'Count', gridcolor: '#2d5a7b', zerolinecolor: '#2d5a7b' },
-        showlegend: true,
-        legend: { x: 0, y: 1, font: { size: 10 } },
-        margin: { l: 50, r: 20, t: 20, b: 40 }
-    };
-    const traces = [
-        { x: timestamps, y: totalEvents, name: 'Total', type: 'scatter', mode: 'lines', line: { color: '#3b82f6', width: 2 } },
-        { x: timestamps, y: attackEvents, name: 'Attacks', type: 'scatter', mode: 'lines', line: { color: '#ef4444', width: 2 } },
-        { x: timestamps, y: benignEvents, name: 'Benign', type: 'scatter', mode: 'lines', line: { color: '#22c55e', width: 2 } }
-    ];
-    Plotly.react('eventsTimeline', traces, layout, { responsive: true });
+    ], chartLayoutUpdate);
 }
 
-// Update Feature Importance
-function updateFeatureImportance() {
-    // Mock feature importance (in real scenario, call /predict/explain endpoint)
-    const features = [
-        'Flow Duration',
-        'Total Fwd Packets',
-        'Total Bwd Packets',
-        'Flow Bytes/s',
-        'Flow Packets/s',
-        'Fwd Packet Length Mean',
-        'Bwd Packet Length Mean',
-        'Flow IAT Mean',
-        'Active Mean',
-        'Idle Mean'
-    ];
-    
-    const importance = features.map(() => Math.random());
-    const sorted = features
-        .map((f, i) => ({ feature: f, importance: importance[i] }))
-        .sort((a, b) => b.importance - a.importance);
-    
-    const labels = sorted.map(item => item.feature);
-    const values = sorted.map(item => item.importance);
-    
-    const colors = values.map(v => {
-        if (v > 0.7) return '#ef4444';
-        if (v > 0.4) return '#f59e0b';
-        return '#3b82f6';
-    });
-    
-    Plotly.update('featureImportance', {
-        x: [values],
-        y: [labels],
-        marker: { 
-            color: [colors],
-            line: { color: '#2d5a7b', width: 1 }
-        }
-    }, {
-        xaxis: { title: 'Importance Score', gridcolor: '#2d5a7b', range: [0, 1] },
-        yaxis: { gridcolor: '#2d5a7b' }
+/* ============================================
+   ALERTS
+   ============================================ */
+
+function populateAlerts() {
+    const container = document.getElementById("alertsTable");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    predictionHistory.slice(-10).reverse().forEach(pred => {
+        const div = document.createElement("div");
+        div.className = "alert-item";
+        div.innerHTML = `
+            <div><strong>${pred.predicted_class}</strong></div>
+            <div>Confidence: ${(pred.confidence * 100).toFixed(1)}%</div>
+        `;
+        container.appendChild(div);
     });
 }
 
-// Add alert to table
-function addAlert(prediction) {
-    const alertsContainer = document.getElementById('alertsTable');
-    const alertItem = document.createElement('div');
-    
-    const className = prediction.predicted_class || 'Unknown';
-    const confidence = ((prediction.confidence || 0) * 100).toFixed(1);
-    const timestamp = moment().format('HH:mm:ss');
-    
-    let severity = 'benign';
-    if (className !== 'BENIGN') {
-        if (confidence > 90) severity = 'critical';
-        else if (confidence > 75) severity = 'high';
-        else if (confidence > 50) severity = 'medium';
-        else severity = 'low';
-    }
-    
-    alertItem.className = `alert-item ${severity}`;
-    alertItem.innerHTML = `
-        <div class="alert-header">
-            <span class="alert-type">${className}</span>
-            <span class="alert-time">${timestamp}</span>
-        </div>
-        <div class="alert-confidence">Confidence: ${confidence}%</div>
-    `;
-    
-    alertsContainer.insertBefore(alertItem, alertsContainer.firstChild);
-    
-    // Keep only last 20 alerts
-    while (alertsContainer.children.length > 20) {
-        alertsContainer.removeChild(alertsContainer.lastChild);
-    }
-}
+/* ============================================
+   TABLE
+   ============================================ */
 
-// Clear alerts
-function clearAlerts() {
-    const alertsContainer = document.getElementById('alertsTable');
-    alertsContainer.innerHTML = '';
-    predictionHistory = [];
-    totalPredictions = 0;
-    attackCount = 0;
-    updateKPIs();
-    initializeCharts();
+function populateTable() {
+    const tbody = document.getElementById("csvResultsTableBody");
+    if (!tbody) return;
+
+    tbody.innerHTML = "";
+
+    predictionHistory.slice(0, 1000).forEach((pred, i) => {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>${i + 1}</td>
+            <td>${pred.predicted_class}</td>
+            <td>${(pred.confidence * 100).toFixed(1)}%</td>
+            <td>${pred.actual_label || "N/A"}</td>
+            <td>${pred.actual_label
+                ? (pred.actual_label === pred.predicted_class ? "✓" : "✗")
+                : "N/A"}
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    });
 }

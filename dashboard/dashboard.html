@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Threat Intelligence Dashboard</title>
+    <title>SOC Lite | AI-Powered Network Intrusion Detection System</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -25,12 +25,72 @@
             min-height: 100vh;
             overflow-x: hidden;
         }
+
+        /* --- SOC Background (lightweight, chart-safe) --- */
+        .bg-grid {
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0, 212, 170, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 212, 170, 0.035) 1px, transparent 1px);
+            background-size: 70px 70px;
+            animation: gridMove 22s linear infinite;
+            z-index: 0;
+            pointer-events: none;
+            opacity: 0.9;
+        }
+        @keyframes gridMove {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(70px, 70px); }
+        }
+
+        #particles-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .vignette {
+            position: fixed;
+            inset: 0;
+            background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.75) 100%);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .scan-line {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0, 212, 170, 0.75), transparent);
+            z-index: 3;
+            animation: scan 10s linear infinite;
+            box-shadow: 0 0 14px rgba(0, 212, 170, 0.45);
+            pointer-events: none;
+            opacity: 0.65;
+        }
+        @keyframes scan {
+            0% { transform: translateY(0); opacity: 0; }
+            12% { opacity: 1; }
+            88% { opacity: 1; }
+            100% { transform: translateY(100vh); opacity: 0; }
+        }
+
+        /* UI above background */
+        .header, .dashboard { position: relative; z-index: 10; }
+
         .header {
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 12px 24px;
-            background: var(--bg-card);
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(14px);
             border-bottom: 1px solid var(--border);
         }
         .header h1 {
@@ -73,7 +133,8 @@
             margin-bottom: 20px;
         }
         .kpi-card {
-            background: var(--bg-card);
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
@@ -109,11 +170,12 @@
             .charts-grid { grid-template-columns: 1fr; }
         }
         .chart-card {
-            background: var(--bg-card);
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
-            min-height: 280px;
+            min-height: 360px;
         }
         .chart-card h3 {
             font-size: 0.9rem;
@@ -126,8 +188,9 @@
             opacity: 0.9;
             margin-bottom: 10px;
         }
-        .chart-card .plot-container { width: 100%; height: 240px; }
-        .chart-card.chart-pie .plot-container { height: 300px; }
+        .chart-card .plot-container { width: 100%; height: 320px; min-height: 300px; }
+        .chart-card.chart-pie .plot-container { height: 380px; min-height: 340px; }
+        .chart-card[style*="grid-column: 1"] .plot-container { height: 340px; }
         .actions {
             margin-bottom: 20px;
         }
@@ -166,7 +229,8 @@
         }
         #runPredictionBtn:disabled { opacity: 0.6; cursor: not-allowed; }
         .alerts-section {
-            background: var(--bg-card);
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
@@ -186,7 +250,8 @@
         /* CSV results table */
         #csvResultsSection { margin-bottom: 20px; }
         .csv-results-card {
-            background: var(--bg-card);
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 16px;
@@ -217,11 +282,16 @@
     </style>
 </head>
 <body>
+    <div class="bg-grid"></div>
+    <canvas id="particles-canvas"></canvas>
+    <div class="vignette"></div>
+    <div class="scan-line"></div>
+
     <header class="header">
         <div style="display: flex; align-items: center; gap: 15px;">
             <a href="index.html" class="nav-btn">Home</a>
             <a href="analysis.html" class="nav-btn">CSV Analysis</a>
-            <h1 style="margin-left: 20px;">Threat Intelligence Dashboard</h1>
+            <h1 style="margin-left: 20px;">SOC Lite: AI-Powered Network Intrusion Detection System</h1>
         </div>
         <div class="header-right">
             <span id="clock">--</span>
@@ -258,8 +328,6 @@
         </div>
 
         <div class="actions">
-            <button type="button" id="loadCSVBtn" class="btn-clear-csv" style="margin-right: 10px;" onclick="typeof loadCSVResultsClick === 'function' && loadCSVResultsClick()">Load CSV results</button>
-            <button type="button" id="runPredictionBtn" onclick="typeof runPrediction === 'function' && runPrediction()">Run Prediction</button>
             <p style="margin-top: 10px; font-size: 0.8rem; color: var(--text-secondary);">Use <strong>Index → CSV Analysis → Dashboard</strong>. After running <strong>Analyze File</strong> on the CSV page, click <strong>Load CSV results</strong> or <strong>Run Prediction</strong> here to show results. Backend must run on port 8000.</p>
         </div>
 
@@ -283,8 +351,9 @@
                 <div id="eventsTimeline" class="plot-container"></div>
             </div>
             <div class="chart-card" style="grid-column: 1 / -1;">
-                <h3>Feature Importance</h3>
-                <div id="featureImportance" class="plot-container"></div>
+                <h3>Confidence Distribution</h3>
+                <p class="chart-note">How many predictions fall in each confidence range (model certainty).</p>
+                <div id="confidenceDist" class="plot-container"></div>
             </div>
         </div>
 
@@ -315,5 +384,134 @@
 
     <script src="js/config.js"></script>
     <script src="js/dashboard.js"></script>
-</body>
-</html>
+
+<script>
+(function () {
+
+    const canvas = document.getElementById('particles-canvas');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d', { alpha: true });
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    /* ===============================
+       DATA PACKET STREAM (left → right)
+    =============================== */
+
+    class Packet {
+        constructor() {
+            this.reset();
+        }
+
+        reset() {
+            this.x = -20;
+            this.y = Math.random() * canvas.height;
+            this.speed = Math.random() * 1.2 + 0.4;
+            this.length = Math.random() * 60 + 30;
+            this.opacity = Math.random() * 0.25 + 0.05;
+        }
+
+        update() {
+            this.x += this.speed;
+            if (this.x > canvas.width + 50) {
+                this.reset();
+            }
+        }
+
+        draw() {
+            const gradient = ctx.createLinearGradient(
+                this.x,
+                this.y,
+                this.x + this.length,
+                this.y
+            );
+
+            gradient.addColorStop(0, "rgba(0,212,170,0)");
+            gradient.addColorStop(0.5, `rgba(0,212,170,${this.opacity})`);
+            gradient.addColorStop(1, "rgba(0,212,170,0)");
+
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = 1.2;
+
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y);
+            ctx.lineTo(this.x + this.length, this.y);
+            ctx.stroke();
+        }
+    }
+
+    /* ===============================
+       AI NODE PULSES
+    =============================== */
+
+    class Node {
+        constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.baseRadius = Math.random() * 2 + 1.5;
+            this.phase = Math.random() * Math.PI * 2;
+        }
+
+        draw(time) {
+            const pulse = Math.sin(time * 0.002 + this.phase) * 0.5 + 0.5;
+            const radius = this.baseRadius + pulse * 3;
+
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(59,130,246,${0.15 + pulse * 0.2})`;
+            ctx.fill();
+        }
+    }
+
+    /* ===============================
+       VERTICAL TRAFFIC BEAMS
+    =============================== */
+
+    class Beam {
+        constructor() {
+            this.x = Math.random() * canvas.width;
+            this.opacity = Math.random() * 0.04 + 0.01;
+        }
+
+        draw() {
+            ctx.fillStyle = `rgba(0,212,170,${this.opacity})`;
+            ctx.fillRect(this.x, 0, 1, canvas.height);
+        }
+    }
+
+    const packets = [];
+    const nodes = [];
+    const beams = [];
+
+    for (let i = 0; i < 35; i++) packets.push(new Packet());
+    for (let i = 0; i < 25; i++) nodes.push(new Node());
+    for (let i = 0; i < 12; i++) beams.push(new Beam());
+
+    function animate(time) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw beams first
+        beams.forEach(b => b.draw());
+
+        // Draw packets
+        packets.forEach(p => {
+            p.update();
+            p.draw();
+        });
+
+        // Draw nodes
+        nodes.forEach(n => n.draw(time));
+
+        requestAnimationFrame(animate);
+    }
+
+    animate();
+
+})();
+</script>
