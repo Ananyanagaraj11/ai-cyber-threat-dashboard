@@ -154,6 +154,8 @@ async def analyze_csv(file: UploadFile = File(...)):
         return {"success": False, "error": "Model not loaded"}
 
     contents = await file.read()
+    if len(contents) > 15_000_000:
+        return {"success": False, "error": "File too large. Use a CSV under 15MB for the demo."}
     df = pd.read_csv(StringIO(contents.decode("utf-8")))
 
     original_row_count = len(df)
@@ -173,8 +175,8 @@ async def analyze_csv(file: UploadFile = File(...)):
     numeric_df = df.select_dtypes(include=[np.number])
     numeric_df = numeric_df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # Analyze whole CSV; safety cap to avoid OOM on huge files (e.g. 100k rows)
-    max_rows_analyze = 100_000
+    # Cap rows so analysis finishes within Render 30s request timeout (~3k rows is safe)
+    max_rows_analyze = 3_000
     if len(numeric_df) > max_rows_analyze:
         numeric_df = numeric_df.head(max_rows_analyze)
         if actual_labels is not None:

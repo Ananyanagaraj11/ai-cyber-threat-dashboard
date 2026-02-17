@@ -235,6 +235,7 @@ fileInput.addEventListener('change',function(){
 /* ANALYZE FILE – real backend call (long timeout for Render cold start) */
 async function analyzeFile(){
     if(!selectedFile){ alert('Please select a CSV file.'); return; }
+    if(selectedFile.size > 10*1024*1024){ alert('File too large for demo. Use a CSV under 10MB (or fewer rows).'); return; }
     var progressSection=document.getElementById('progressSection');
     var progressFill=document.getElementById('progressFill');
     var progressText=document.getElementById('progressText');
@@ -250,8 +251,8 @@ async function analyzeFile(){
         var timeoutId = setTimeout(function(){ controller.abort(); }, 120000);
         var response = await fetch((API_BASE||'')+'/analyze/csv',{ method:'POST', body:formData, signal: controller.signal });
         clearTimeout(timeoutId);
-        if(!response.ok) throw new Error('Server error ' + response.status);
-        var data = await response.json();
+        var data = await response.json().catch(function(){ return {}; });
+        if(!response.ok) throw new Error(data.error || data.message || ('Server ' + response.status));
         if(!data.success) throw new Error(data.error||'Analysis failed');
         progressFill.style.width='100%';
         progressText.textContent='Complete.';
