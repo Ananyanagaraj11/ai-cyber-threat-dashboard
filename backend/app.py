@@ -155,6 +155,9 @@ async def analyze_csv(file: UploadFile = File(...)):
         contents = await file.read()
         df = pd.read_csv(StringIO(contents.decode("utf-8")))
 
+        if len(df) > 5000:
+            df = df.sample(n=5000, random_state=42)
+
         original_row_count = len(df)
 
         # Detect label column
