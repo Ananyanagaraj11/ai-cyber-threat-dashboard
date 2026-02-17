@@ -31,8 +31,8 @@ An end-to-end machine learning pipeline for detecting and classifying cyber atta
 
 ```bash
 # Clone the repository
-git clone https://github.com/Ananyanagaraj11/ai-cyber-threat-dashboard.git
-cd ai-cyber-threat-dashboard
+git clone https://github.com/Ananyanagaraj11/soc-lite-ai-ids.git
+cd soc-lite-ai-ids
 
 # Install dependencies
 pip install -r requirements.txt
@@ -80,13 +80,13 @@ python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
 - `GET /config` - Model configuration (input_dim, class_names)
 - `POST /predict` - Single prediction from feature vector
 - `POST /predict/explain` - Prediction with feature importance
-- `POST /analyze/csv` - Batch CSV analysis (up to 1000 rows)
+- `POST /analyze/csv` - Batch CSV analysis (full dataset)
 - `GET /api/last-analysis` - Retrieve last CSV analysis results
 
 ## 🗂️ Project Structure
 
 ```
-ai-cyber-threat-dashboard/
+soc-lite-ai-ids/
 ├── backend/
 │   ├── app.py              # FastAPI server (API + static dashboard)
 │   ├── explain.py          # Feature importance explanations
@@ -132,7 +132,7 @@ ai-cyber-threat-dashboard/
    git init
    git add .
    git commit -m "Initial commit"
-   git remote add origin https://github.com/Ananyanagaraj11/ai-cyber-threat-dashboard.git
+   git remote add origin https://github.com/Ananyanagaraj11/soc-lite-ai-ids.git
    git push -u origin main
    ```
 
@@ -190,7 +190,7 @@ MIT License - feel free to use for research, learning, or internal SOC tooling.
 
 - **Live Demo:** [Deploy to Vercel](DEPLOY.md)
 - **Documentation:** See `DEPLOY.md`, `GITHUB_SETUP.md`, `TRAINING_AND_CSV_CHECK.md`
-- **Issues:** [GitHub Issues](https://github.com/Ananyanagaraj11/ai-cyber-threat-dashboard/issues)
+- **Issues:** [GitHub Issues](https://github.com/Ananyanagaraj11/soc-lite-ai-ids/issues)
 
 ---
 
