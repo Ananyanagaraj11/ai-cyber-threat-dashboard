@@ -1,5 +1,3 @@
-// Backend API URL - set by deployment or defaults to localhost
-// For Vercel + Render: replace this file at build time with your Render backend URL
-// Or set window.ENV_API_BASE before loading dashboard.js
-// TEMPORARY: Using ngrok URL for live demo (update when ngrok restarts)
-window.ENV_API_BASE = "http://localhost:8000";
+// Backend API URL. On Vercel, set Vercel env var NEXT_PUBLIC_API_URL or edit this.
+// Backend cannot run on Vercel (use Railway, Fly.io, or run locally).
+window.ENV_API_BASE = window.ENV_API_BASE || null;
